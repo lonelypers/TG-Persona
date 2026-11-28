@@ -663,7 +663,7 @@ section.act,.fold.open .fold-b{animation:none}
     <h2><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>自动化</h2>
     <div class="sub">定时签到、定时抢注、抢注监控、抢红包和自定义任务</div>
     <div class="card fold" id="aiAssistantCard">
-      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl">AI 助手 · 说人话建任务</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="m12 3-1.9 5.7a2 2 0 0 1-1.4 1.4L3 12l5.7 1.9a2 2 0 0 1 1.4 1.4L12 21l1.9-5.7a2 2 0 0 1 1.4-1.4L21 12l-5.7-1.9a2 2 0 0 1-1.4-1.4z"/></svg>AI 助手 · 说人话建任务</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
         <label for="aiDraftText">告诉我你想做什么</label>
         <textarea id="aiDraftText" rows="4" maxlength="2000" placeholder="每天 08:00–09:00 给 @xxxbot 发 /start，等 2 秒点签到按钮，点完再等 3 秒，成功回复包含签到成功。" oninput="invalidateAIDraft()"></textarea>
@@ -678,7 +678,7 @@ section.act,.fold.open .fold-b{animation:none}
     </div>
 
     <div class="card fold" id="aiRunCard">
-      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl">AI 试跑 · 让它自己操作</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m10 8 6 4-6 4z"/></svg>AI 试跑 · 让它自己操作</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
         <label for="aiRunTarget">试跑目标</label>
         <input type="text" id="aiRunTarget" maxlength="256" placeholder="@bot 用户名、群 ID 或已保存会话">
@@ -696,7 +696,7 @@ section.act,.fold.open .fold-b{animation:none}
     </div>
 
     <div class="card fold">
-      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl">配置导入导出</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M7 4v14m0 0-3-3m3 3 3-3"/><path d="M17 20V6m0 0-3 3m3-3 3 3"/></svg>配置导入导出</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
       <div class="flex" style="gap:8px"><button class="ghost" id="configExportAll" onclick="exportConfig(false)">导出当前账号全部配置</button><button class="ghost" id="configExportSelected" onclick="exportConfig(true)">导出选中任务</button></div>
       <div class="hint">JSON 标准 tg-persona-config：仅任务、规则、监听群，不含系统登录密钥、手机号、会话或历史状态。备份只下载到本机。任务消息或规则文本可能包含你自行填写的敏感内容，请妥善保存备份文件，勿公开分享。</div>
