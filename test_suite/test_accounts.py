@@ -416,6 +416,37 @@ class AccountsTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue((await self.req('GET', '/api/logs', 'default')).json()['hits'])
         self.assertFalse((await self.req('GET', '/api/logs', aid)).json()['hits'])
 
+    async def test_emby_notify_force_bypasses_global_switches(self):
+        with use_runtime(self.rt()):
+            self.main.set_setting("notify_on_success", "0")
+            self.main.set_setting("notify_on_fail", "0")
+        with patch.object(self.main, "send_notify") as send:
+            self.main._emby_ka_notify("success", "观看保活 · 略略略", "观看完成")
+            self.main._emby_ka_notify("fail", "观看保活 · 略略略", "文件不可播")
+        self.assertEqual(send.call_count, 2)
+
+    async def test_emby_runs_are_visible_in_logs_tab(self):
+        db = self.rt().db
+        db.execute("INSERT INTO emby_accounts(name,base_url,username,password) "
+                   "VALUES('略略略','https://emby.example.com','u','p')")
+        aid = db.execute("SELECT id FROM emby_accounts ORDER BY id DESC LIMIT 1").fetchone()["id"]
+        db.execute("INSERT INTO emby_runs(account_id,ok,msg,item,play_sec,bytes,steps_json,finished_at) "
+                   "VALUES(?,?,?,?,?,?,?,?)",
+                   (aid, 1, "观看完成（390s，39 条心跳，拉流 400.0MB）", "小黄人与大怪兽", 390,
+                    419430400, json.dumps([{"name": "开始观看", "ok": True}], ensure_ascii=False), 1795705944))
+        db.commit()
+        payload = (await self.req('GET', '/api/logs?kind=emby')).json()
+        self.assertEqual(len(payload["hits"]), 1)
+        hit = payload["hits"][0]
+        self.assertEqual(hit["action"], "emby")
+        self.assertEqual(hit["grp_name"], "略略略")
+        self.assertEqual(hit["detail"]["item"], "小黄人与大怪兽")
+        self.assertTrue(hit["detail"]["steps"])
+        self.assertEqual((await self.req('GET', '/api/logs?kind=emby&q=怪兽')).json()["hits"][0]["id"], hit["id"])
+        self.assertEqual((await self.req('GET', '/api/logs')).json()["counts"]["emby"], 1)
+        self.assertEqual((await self.req('POST', '/api/logs/clear', json={})).json()["deleted"], 1)
+        self.assertFalse((await self.req('GET', '/api/logs?kind=emby')).json()["hits"])
+
     async def test_logs_pagination_export_and_ai_usage_are_account_scoped(self):
         aid = await self.create()
         with use_runtime(self.rt(aid)):

@@ -16,6 +16,7 @@ import json
 import logging
 import random
 import re
+import sqlite3
 import time
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
@@ -59,7 +60,7 @@ DEFAULT_CONFIG = {
     "concurrency": 1,
     "retry_hours": 4,
     "cap_mb": 400,
-    "notify_mode": "fail",          # all | fail | off
+    "notify_mode": "all",           # all | fail | off
     "default_profile": dict(BUILTIN_PROFILE),
 }
 
@@ -81,7 +82,7 @@ CREATE TABLE IF NOT EXISTS emby_accounts (
     device_id TEXT NOT NULL DEFAULT '', template_key TEXT NOT NULL DEFAULT '',
     mode TEXT NOT NULL DEFAULT 'play', enabled INTEGER NOT NULL DEFAULT 1,
     interval_days REAL NOT NULL DEFAULT 3, stream_cap_mb INTEGER NOT NULL DEFAULT 400,
-    clean_userdata INTEGER NOT NULL DEFAULT 1, notify_mode TEXT NOT NULL DEFAULT 'fail',
+    clean_userdata INTEGER NOT NULL DEFAULT 1, notify_mode TEXT NOT NULL DEFAULT 'all',
     next_run_at INTEGER NOT NULL DEFAULT 0, retry_at INTEGER NOT NULL DEFAULT 0,
     fail_count INTEGER NOT NULL DEFAULT 0, circuit_until INTEGER NOT NULL DEFAULT 0,
     last_run_at INTEGER NOT NULL DEFAULT 0, last_result TEXT NOT NULL DEFAULT '',
@@ -131,6 +132,14 @@ def init_schema(db) -> None:
             "VALUES(?,?,?,?,?,?,?,1)",
             (key, name, client, version, device, ua, ""),
         )
+    # 1.29.63：观看保活默认改成成功/失败都通知。只迁移一次，之后显式选的“仅失败”保持。
+    try:
+        if db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='settings'").fetchone():
+            if not db.execute("SELECT value FROM settings WHERE key='emby_notify_all_v1'").fetchone():
+                db.execute("UPDATE emby_accounts SET notify_mode='all' WHERE notify_mode='fail'")
+                db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('emby_notify_all_v1','1')")
+    except sqlite3.Error:
+        pass
     db.commit()
 
 
@@ -337,7 +346,7 @@ def get_config(db) -> dict:
     cfg["retry_hours"] = max(0.5, min(48, _as_float(cfg.get("retry_hours"), 4)))
     cfg["cap_mb"] = max(20, min(1024, _as_int(cfg.get("cap_mb"), 400)))
     if cfg.get("notify_mode") not in ("all", "fail", "off"):
-        cfg["notify_mode"] = "fail"
+        cfg["notify_mode"] = "all"
     return cfg
 
 
@@ -457,7 +466,7 @@ def create_account(db, payload: dict) -> dict:
          profile["client"], profile["device"], profile["version"], profile["ua"], profile["device_id"],
          template_key, mode, 0 if payload.get("enabled") in (0, False, "0") else 1,
          interval, cap_mb, 0 if payload.get("clean_userdata") in (0, False, "0") else 1,
-         payload.get("notify_mode") if payload.get("notify_mode") in ("all", "fail", "off") else "fail",
+         payload.get("notify_mode") if payload.get("notify_mode") in ("all", "fail", "off") else "all",
          now if payload.get("enabled") not in (0, False, "0") else 0, now),
     )
     db.commit()

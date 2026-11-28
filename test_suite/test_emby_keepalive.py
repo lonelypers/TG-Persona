@@ -5,7 +5,7 @@ import random
 import sqlite3
 import time
 import unittest
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch, AsyncMock, Mock
 
 import httpx
 from httpx import AsyncClient as RealAsyncClient
@@ -16,6 +16,7 @@ import emby_keepalive as ka
 def make_db():
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row
+    db.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')")
     ka.init_schema(db)
     return db
 
@@ -113,6 +114,19 @@ class ProfileTests(unittest.TestCase):
         ):
             ok, _ = ka.validate_profile(*bad)
             self.assertFalse(ok, bad)
+
+    def test_default_notify_mode_is_all_and_migrates_once(self):
+        db = make_db()
+        account = account_row(db, notify_mode="fail")
+        self.assertEqual(account["notify_mode"], "fail")
+        db.execute("DELETE FROM settings WHERE key='emby_notify_all_v1'")
+        db.commit()
+        ka.init_schema(db)
+        self.assertEqual(ka.get_account(db, account["id"])["notify_mode"], "all")
+        db.execute("UPDATE emby_accounts SET notify_mode='fail' WHERE id=?", (account["id"],))
+        db.commit()
+        ka.init_schema(db)
+        self.assertEqual(ka.get_account(db, account["id"])["notify_mode"], "fail")
 
     def test_template_seeded_and_device_fixed(self):
         db = make_db()
@@ -265,6 +279,21 @@ class RunTests(unittest.IsolatedAsyncioTestCase):
         self.db.commit()
         await ka.startup_recover(self.db, "test")
         self.assertEqual(ka.get_account(self.db, account["id"])["next_run_at"], future)
+
+    async def test_success_and_failure_both_notify_with_default_mode(self):
+        account = account_row(self.db)
+        self.assertEqual(account["notify_mode"], "all")
+        cfg = ka.get_config(self.db)
+        calls = []
+        def notify(kind, name, detail=""):
+            calls.append((kind, name, detail))
+        success = {"ok": True, "msg": "观看完成", "item": "示例", "play_sec": 90, "bytes": 1024,
+                   "steps": [{"name": "开始观看", "ok": True}]}
+        ka._finish(self.db, "test", account, 0, success, cfg, notify)
+        failure = {"ok": False, "msg": "文件不可播", "item": "", "play_sec": 0, "bytes": 0,
+                   "steps": [{"name": "拉流校验", "ok": False}]}
+        ka._finish(self.db, "test", account, 0, failure, cfg, notify)
+        self.assertEqual([x[0] for x in calls], ["success", "fail"])
 
     async def test_failure_sets_retry_without_consuming_interval(self):
         account = account_row(self.db)

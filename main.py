@@ -801,10 +801,10 @@ def send_notify(title, text=""):
         pass
 
 
-def notify_event(kind, name, detail=""):
-    """kind: success/fail;按设置决定是否推送"""
+def notify_event(kind, name, detail="", force=False):
+    """kind: success/fail;按设置决定是否推送，force 供任务级通知开关覆盖全局开关。"""
     key = "notify_on_success" if kind == "success" else "notify_on_fail"
-    if get_setting(key, "0") == "1":
+    if force or get_setting(key, "0") == "1":
         send_notify(f"{'✅' if kind=='success' else '❌'} {name}", detail)
 
 
@@ -10647,9 +10647,9 @@ async def keepalive_loop():
 
 
 def _emby_ka_notify(kind, name, detail=""):
-    """观看保号结果通知：沿用现有通知通道（notify_on_success / notify_on_fail）"""
+    """观看保号结果通知：账号自己的通知模式已经决定发不发，成功/失败都走同一通道。"""
     try:
-        notify_event(kind, name, detail)
+        notify_event(kind, name, detail, force=True)
     except Exception:
         log.warning("观看保号通知失败", exc_info=True)
 
@@ -15396,9 +15396,14 @@ async def clear_logs(body: dict = None):
     days = (body or {}).get("days")
     if days is None:
         cur = get_account_db().execute("DELETE FROM hits")
+        try:
+            emby_cur = get_account_db().execute("DELETE FROM emby_runs")
+            emby_n = emby_cur.rowcount or 0
+        except sqlite3.Error:
+            emby_n = 0
         get_account_db().execute("DELETE FROM ai_flock_traces")
         get_account_db().commit()
-        n = cur.rowcount or 0
+        n = (cur.rowcount or 0) + emby_n
         try:
             get_account_db().execute("VACUUM")
             get_account_db().commit()
@@ -15406,13 +15411,63 @@ async def clear_logs(body: dict = None):
             pass
         return {"ok": True, "deleted": n, "mode": "all"}
     n = purge_hits(int(days))
+    cutoff = int(time.time()) - int(days) * 86400
+    try:
+        emby_cur = get_account_db().execute("DELETE FROM emby_runs WHERE finished_at < ?", (cutoff,))
+        get_account_db().commit()
+        n += emby_cur.rowcount or 0
+    except sqlite3.Error:
+        pass
     return {"ok": True, "deleted": n, "mode": "days", "days": int(days)}
+
+
+def _log_counts():
+    counts = {"reply": 0, "signin": 0, "scheduled_register": 0, "grabcodes": 0, "redpacket": 0, "custom": 0,
+              "keepalive": 0, "link_register": 0, "button_register": 0, "code_register": 0, "cc_register": 0,
+              "ai_flock": 0, "emby": 0}
+    for r in get_account_db().execute("SELECT action, COUNT(*) c FROM hits GROUP BY action").fetchall():
+        k = "reply" if r["action"] in ("reply", "react", "both") else r["action"]
+        if k in counts:
+            counts[k] += r["c"]
+    try:
+        counts["emby"] = get_account_db().execute("SELECT COUNT(*) FROM emby_runs").fetchone()[0]
+    except sqlite3.Error:
+        pass
+    return counts
 
 
 @app.get("/api/logs")
 async def get_logs(n: int = 60, kind: str = "", q: str = "", before: int = 0):
-    """kind: reply(关键词回复) / signin / grabcodes / redpacket / custom;留空=全部"""
+    """kind: reply(关键词回复) / signin / emby(观看保活) / ...;留空=全部"""
     kind = (kind or "").strip()
+    if kind == "emby":
+        limit = min(max(1, n), 200)
+        where, params = "1=1", []
+        if q.strip():
+            like = "%" + q.strip()[:60] + "%"
+            where += " AND (COALESCE(a.name,'') LIKE ? OR r.msg LIKE ? OR r.item LIKE ? OR r.steps_json LIKE ?)"
+            params = [like] * 4
+        if before:
+            where += " AND r.id<?"
+            params.append(int(before))
+        rows = get_account_db().execute(
+            "SELECT r.id,r.finished_at, r.ok,r.msg,r.item,r.play_sec,r.bytes,r.steps_json,"
+            " COALESCE(a.name,'') AS account_name FROM emby_runs r "
+            "LEFT JOIN emby_accounts a ON a.id=r.account_id "
+            "WHERE " + where + " ORDER BY r.id DESC LIMIT ?", (*params, limit)).fetchall()
+        out = []
+        for r in rows:
+            try:
+                steps = json.loads(r["steps_json"] or "[]")
+            except Exception:
+                steps = []
+            account_name = r["account_name"] or ("账号 #" + str(r["id"]))
+            out.append({"id": r["id"], "ts": r["finished_at"], "chat_id": 0, "rule_id": 0, "msg_id": 0,
+                        "action": "emby", "content": r["item"] or r["msg"], "reply": r["msg"],
+                        "grp_name": account_name, "ok": bool(r["ok"]), "sender": "观看保活",
+                        "detail": {"account": account_name, "item": r["item"], "message": r["msg"],
+                                   "play_sec": r["play_sec"], "bytes": r["bytes"], "steps": steps}})
+        return {"hits": out, "counts": _log_counts(), "has_more": len(out) == limit}
     if kind == "reply":
         where, params = "action IN ('reply','react','both')", []
     elif kind in ("signin", "scheduled_register", "grabcodes", "redpacket", "custom", "keepalive", "link_register", "button_register", "code_register", "cc_register", "ai_flock"):
@@ -15442,13 +15497,7 @@ async def get_logs(n: int = 60, kind: str = "", q: str = "", before: int = 0):
         out.append(d)
     if q.strip():
         return {"hits": out, "counts": {}, "has_more": len(out) == min(n, 200)}
-    counts = {"reply": 0, "signin": 0, "scheduled_register": 0, "grabcodes": 0, "redpacket": 0, "custom": 0,
-              "keepalive": 0, "link_register": 0, "button_register": 0, "code_register": 0, "cc_register": 0, "ai_flock": 0}
-    for r in get_account_db().execute("SELECT action, COUNT(*) c FROM hits GROUP BY action").fetchall():
-        k = "reply" if r["action"] in ("reply", "react", "both") else r["action"]
-        if k in counts:
-            counts[k] += r["c"]
-    return {"hits": out, "counts": counts, "has_more": len(out) == min(n, 200)}
+    return {"hits": out, "counts": _log_counts(), "has_more": len(out) == min(n, 200)}
 
 
 @app.get("/api/logs/export")

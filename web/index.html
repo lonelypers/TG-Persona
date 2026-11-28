@@ -1553,7 +1553,7 @@ section.act,.fold.open .fold-b{animation:none}
             </div>
             <div class="hint">实际观看时间在「上限的一半 ~ 上限」之间随机挑一天、随机挑时刻（比如上限填 20 天，就是 10~20 天内某天某个时间）。成功看完一次后会重新抽下一次，不会固定成每 14 天准点看一次。</div>
             <div class="hint">服务重启 / 面板升级后，已到期的账号会自动延后 5~10 分钟再跑，等网络和上游鉴权稳定下来。</div>
-            <label for="eNotify">通知</label><select id="eNotify"><option value="fail">仅失败通知</option><option value="all">成功和失败都通知</option><option value="off">不通知</option></select>
+            <label for="eNotify">通知</label><select id="eNotify"><option value="all">成功和失败都通知</option><option value="fail">仅失败通知</option><option value="off">不通知</option></select>
             <label class="check"><input type="checkbox" id="eClean" checked> 观看结束后清除播放记录（已看状态 / 播放次数 / 续播进度）</label>
             <label class="check"><input type="checkbox" id="eEnabled" checked> 启用</label>
             <input type="hidden" id="eId" value="">
@@ -1714,7 +1714,7 @@ section.act,.fold.open .fold-b{animation:none}
     <div class="log-toolbar">
       <div class="search">
         <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
-        <input type="text" placeholder="搜索群名 / 发送人 / 消息内容…" id="logQ" oninput="onLogSearch()">
+        <input type="text" placeholder="搜索群名 / 账号 / 影片 / 消息内容…" id="logQ" oninput="onLogSearch()">
       </div>
       <button class="ghost" onclick="clearLogs(30)">清理 30 天前</button>
       <button class="danger" onclick="clearLogs(0)">清空全部日志</button>
@@ -1734,6 +1734,7 @@ section.act,.fold.open .fold-b{animation:none}
       <button data-k="keepalive" onclick="pickLogKind('keepalive')">群聊</button>
       <button data-k="ai_flock" onclick="pickLogKind('ai_flock')">AI 水群</button>
       <button data-k="game" onclick="pickLogKind('game')">群游戏</button>
+      <button data-k="emby" onclick="pickLogKind('emby')">观看保活</button>
     </div>
     <div class="card" id="logList"></div>
     <div class="flex" style="margin-top:10px"><button class="ghost" type="button" id="logMore" onclick="loadMoreLogs()" disabled>加载更早</button></div>
@@ -3025,7 +3026,7 @@ function openEmbyForm(id){
   $('#eUa').value=a?(a.ua||''):'';
   $('#eInterval').value=a?a.interval_days:3;
   $('#eCap').value=a?a.stream_cap_mb:400;
-  $('#eNotify').value=a?(a.notify_mode||'fail'):'fail';
+  $('#eNotify').value=a?(a.notify_mode||'all'):'all';
   $('#eClean').checked=a?!!a.clean_userdata:true;
   $('#eEnabled').checked=a?!!a.enabled:true;
   if(!id&&!embyTemplates.length)loadEmbyTemplates();
@@ -5914,7 +5915,7 @@ async function delRule(id){if(!confirm('删除规则 #'+id+'?'))return;try{await
 
 // ---------- 日志 ----------
 let logKind='reply';
-const LOG_KINDS={reply:'回复',anomaly:'异常',game:'群游戏',signin:'签到',scheduled_register:'定时抢注',link_register:'链接抢注',button_register:'按钮开注',code_register:'兑换码抢注',grabcodes:'抢注',redpacket:'红包',custom:'自定义',keepalive:'群聊',ai_flock:'AI 水群'};
+const LOG_KINDS={reply:'回复',anomaly:'异常',game:'群游戏',emby:'观看保活',signin:'签到',scheduled_register:'定时抢注',link_register:'链接抢注',button_register:'按钮开注',code_register:'兑换码抢注',grabcodes:'抢注',redpacket:'红包',custom:'自定义',keepalive:'群聊',ai_flock:'AI 水群'};
 function pickLogKind(k){
   if(k!==logKind)resetLogOpenState();
   logKind=k;
@@ -5992,6 +5993,7 @@ function logRow(h){
   else if(h.action==='scheduled_register') title=(d.task||'定时抢注')+(d.bot?('（'+d.bot+'）'):'');
   else if(['link_register','button_register','code_register'].includes(h.action)) title=(d.task||LOG_KINDS[h.action])+(d.bot?('（'+d.bot+'）'):'');
   else if(h.action==='custom') title=(d.task||'自定义任务');
+  else if(h.action==='emby') title=(d.account||h.grp_name||'观看保活')+(d.item?(' · '+d.item):'');
   else if(h.action==='keepalive') title=(d.task||'群聊发言')+(d.group?(' · '+d.group):'');
   else if(h.action==='grabcodes'||h.action==='redpacket') title=(d.task||LOG_KINDS[h.action]||h.action)+(d.group?(' · '+d.group):'');
   else if(h.action==='ai_flock') title='AI 水群 · '+(d.group||h.grp_name||waterAIGroupName(h.chat_id));
@@ -6062,6 +6064,14 @@ function logRow(h){
   }else if(h.action==='custom'){
     add('目标',d.bot||h.chat_id);
     add('过程',d.steps||h.reply);
+  }else if(h.action==='emby'){
+    add('账号',d.account||h.grp_name);
+    add('影片',d.item);
+    add('结果',d.message||h.reply);
+    const sec=Number(d.play_sec||0),mb=Number(d.bytes||0)/1048576;
+    if(sec)add('观看时长',sec>=60?String(Math.floor(sec/60))+' 分 '+String(sec%60)+' 秒':String(sec)+' 秒');
+    if(mb)add('拉流',mb.toFixed(1)+' MB');
+    for(const [i,step] of (Array.isArray(d.steps)?d.steps:[]).entries())add('步骤 '+(i+1),(step.name||'')+(step.ok===false?'（失败）':'')+(step.detail?(' · '+step.detail):''));
   }else if(h.action==='keepalive'){
     add('群',d.group||h.chat_id);
     add('内容',d.message||h.content);

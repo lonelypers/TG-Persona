@@ -1859,6 +1859,12 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     let ran=false;app.api=async(p,o)=>{if(p==='/api/migration/auto-backup/run'){ran=true;return {ok:true,file:'tg-persona-migration-1.tgp',removed:2}}return {enabled:true,time:'05:15',account:'second',caption_password:true,password_present:true,last_run:'2026-11-12 05:15',last_error:'',accounts:[{id:'default',label:'默认',logged_in:true}]}};app.window.confirm=()=>true;await ex('runAutoBackupNow()');assert(ran);assert(q('#autoBackupStatus').textContent.includes('2026-11-12 05:15'));assert(!q('#autoBackupNow').disabled);
     ex('autoBackupBusy=false');q('#autoBackupEnabled').checked=false;ex('syncAutoBackupForm()');assert(q('#autoBackupFields').classList.contains('hidden'));
   });
+  await test('观看保活日志有独立分类并展示账号影片和步骤',async()=>{
+    const start=html.indexOf('<section id="tab-logs">'),end=html.indexOf('</section>',start),part=html.slice(start,end);
+    assert(part.includes('data-k="emby"')&&part.includes('观看保活'));assert(js.includes("emby:'观看保活'"));
+    context.logFixture={action:'emby',ok:1,ts:1,grp_name:'略略略',detail:{account:'略略略',item:'小黄人与大怪兽',message:'观看完成',play_sec:390,bytes:419430400,steps:[{name:'开始观看',ok:true}]}};
+    const markup=run('logRow(logFixture)');assert(markup.includes('略略略')&&markup.includes('小黄人与大怪兽'));assert(markup.includes('观看时长')&&markup.includes('6 分 30 秒'));assert(markup.includes('400.0 MB'));assert(markup.includes('步骤 1')&&markup.includes('开始观看'));
+  });
   await test('日志轮询重绘保留当前展开详情',async()=>{
     assert(js.includes('let logOpenIds=new Set()'));
     assert(js.includes("open=logOpenIds.has(logId)?' open':''"));
