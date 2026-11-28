@@ -315,7 +315,8 @@ input[type=time],input[type=date],input[type=datetime-local]{max-width:100%;min-
 .fold.open>.fold-b{display:block;animation:fade .2s ease}
 
 /* ---------- 日志 ---------- */
-.log-toolbar{position:sticky;top:64px;z-index:30;display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;margin:0 -6px 10px;padding:8px 6px;background:var(--bg);border-bottom:1px solid var(--hair)}
+.log-toolbar{position:sticky;top:64px;z-index:30;display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;gap:8px;margin:0 -6px 10px;padding:8px 6px;background:var(--bg);border-bottom:1px solid var(--hair)}
+.log-toolbar .search input{padding-left:12px;padding-right:40px}.log-toolbar .search svg{left:auto;right:13px}
 .log-toolbar .search{min-width:0}.log-toolbar input,.log-toolbar button{min-height:44px}.log-toolbar button{white-space:nowrap}
 .logitem{padding:11px 0;border-bottom:1px solid var(--hair);font-size:12.5px}
 .logitem:last-child{border-bottom:0}
@@ -520,7 +521,7 @@ label.custom-check input{width:20px;height:20px;flex:none}
   #aListTimed .auto-actions button{min-height:44px}
   #foldTg input,#foldTg select,#foldTg button{min-height:44px}
   .water-ai-model-row button{flex:1 1 100%}.water-ai-actions button{flex-basis:calc(50% - 4px)}
-  .log-toolbar{top:62px;grid-template-columns:repeat(2,minmax(0,1fr))}.log-toolbar .search{grid-column:1/-1}.log-toolbar button{width:100%;padding-inline:8px}
+  .log-toolbar{top:62px;grid-template-columns:repeat(3,minmax(0,1fr))}.log-toolbar .search{grid-column:1/-1}.log-toolbar button{width:100%;padding-inline:4px;font-size:12px}
 }
 @media(max-width:430px){
   .custom-time-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.custom-time-grid>div:first-child{grid-column:1/-1}
