@@ -1595,7 +1595,7 @@ section.act,.fold.open .fold-b{animation:none}
         <div class="empty" id="aEmptyPack">暂无抢红包任务,点上面按钮添加</div>
         <div class="autof" id="af-redpacket"><div class="autof-card"><div class="autof-head"><b>新增 / 编辑抢红包任务</b><button class="ghost" type="button" onclick="closeAutoForm('redpacket')">关闭</button></div><form onsubmit="saveAuto('redpacket');return false">
           <label>任务名称</label>
-          <input type="text" id="pName" placeholder="如: 群红包自动领取">
+          <input type="text" id="rpName" placeholder="如: 群红包自动领取">
           <label>监控群</label>
           <div class="hint" style="margin:0 0 8px">不勾 = 全部监听群</div>
           <div id="pGroups" class="grp-pick"></div>
@@ -1620,15 +1620,12 @@ section.act,.fold.open .fold-b{animation:none}
           </div>
           <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="pCdUnlimited" style="width:auto"> 冷却不限制</label>
           <div class="flex">
-            <div><label>同群冷却(秒)</label><input type="number" id="pCd" value="5" min="0"></div>
+            <div><label>同群冷却(秒)</label><input type="number" id="rpCd" value="5" min="0"></div>
           </div>
           <div class="hint">只点击红包自身的回调按钮（data 以 red_envelope 开头）；链接类、跳转类按钮一律不点（群里可能夹带盗号钓鱼链接）。按钮文案会变，所以不按文字识别。</div>
-          <div class="flex">
-            <div><label>同群冷却(秒)</label><input type="number" id="pCd" value="5" min="0"></div>
-          </div>
           <div class="flex" style="margin-top:14px">
             <button class="btn" type="submit">保存</button>
-            <button class="ghost" type="button" onclick="cancelAutoEdit('redpacket')" id="pCancel" style="display:none">取消编辑</button>
+            <button class="ghost" type="button" onclick="cancelAutoEdit('redpacket')" id="rpCancel" style="display:none">取消编辑</button>
           </div>
         </form></div></div>
       </div>
@@ -1917,7 +1914,7 @@ section.act,.fold.open .fold-b{animation:none}
             <button class="danger" id="accountDelete" disabled onclick="manageAccount('delete')">删除当前</button>
           </div>
           <div id="accountResult" class="hint" role="status" aria-live="polite"></div>
-          <div class="hint">登录新账号不会影响已有账号；备注留空时，登录成功后使用 TG 昵称。默认账号不能删除；其他账号删除时会同时移除对应配置和登录会话。</div>
+          <div class="hint">登录新账号不会影响已有账号；备注留空时，登录成功后使用 TG 昵称。默认账号是系统保留位，无法物理删除，但可在有其他账号时清空登录并从列表隐藏；其他账号删除时会同时移除对应配置和登录会话。</div>
           <hr style="border:0;border-top:1px solid var(--hair);margin:18px 0">
           <div id="tgCard"><div class="empty">加载中...</div></div>
         </div>
@@ -2216,17 +2213,27 @@ function fmt(ts){const d=new Date(ts*1000);return (d.getMonth()+1)+'/'+d.getDate
 
 // ---------- 多账号面板 ----------
 let accounts=[], accountsBusy=false, accountsLoadSeq=0;
+function visibleAccounts(){
+  const def=accounts.find(a=>a.id==='default');
+  if(!def||accounts.length<=1)return accounts;
+  if(tgAddMode&&selectedAccount==='default')return accounts;
+  if(def.hidden)return accounts.filter(a=>a.id!=='default');
+  if(def.logged_in)return accounts;
+  if(def.phase==='code_sent'||def.phase==='need_password')return accounts;
+  return accounts.filter(a=>a.id!=='default');
+}
 function renderAccounts(){
+  const shown=visibleAccounts();
   for(const selector of ['#accountTop','#accountSettings']){
     const el=$(selector);el.replaceChildren();
-    const list=accounts.some(a=>a.id===selectedAccount)?accounts:[...accounts,{id:selectedAccount,label:selectedAccount}];
+    const list=shown.length?shown:[{id:selectedAccount,label:selectedAccount}];
     for(const a of list){const o=document.createElement('option');o.value=a.id;o.textContent=String(a.label||a.id)+(a.logged_in?' · 在线':' · 未登录');el.appendChild(o)}
-    el.value=selectedAccount;
+    el.value=shown.some(a=>a.id===selectedAccount)?selectedAccount:'';
   }
   const a=accounts.find(x=>x.id===selectedAccount)||{label:selectedAccount};
   const phase=({ready:'就绪',idle:'',code_sent:'等待登录验证码',need_password:'等待两步密码'})[a.phase]??String(a.phase||'');
   $('#accountStatus').textContent=String(a.label||a.id)+' · '+(a.logged_in?(a.paused?'已登录 · 已暂停':'已登录 · 运行中'):'未登录')+(phase?' · '+phase:'');
-  $('#accountDelete').disabled=accountsBusy||selectedAccount==='default';
+  $('#accountDelete').disabled=accountsBusy||(selectedAccount==='default'&&!accounts.some(a=>a.id!=='default'&&!a.closing));
 }
 function syncAccountButtons(){for(const id of ['accountReload','accountNew','accountRename'])$('#'+id).disabled=accountsBusy;renderAccounts()}
 async function loadAccounts(){
@@ -2234,7 +2241,9 @@ async function loadAccounts(){
   try{
     const d=await api('/api/accounts');if(seq!==accountsLoadSeq)return;
     accounts=Array.isArray(d.accounts)?d.accounts:[];
-    if(accounts.length&&!accounts.some(a=>a.id===selectedAccount))switchAccount(d.default_id||'default');
+    const shown=visibleAccounts();
+    if(shown.length&&!shown.some(a=>a.id===selectedAccount)){switchAccount(shown[0].id);return}
+    if(accounts.length&&!accounts.some(a=>a.id===selectedAccount))switchAccount(shown[0]?.id||d.default_id||'default');
     renderAccounts();$('#accountResult').textContent='';
   }catch(e){if(seq===accountsLoadSeq)$('#accountResult').textContent='账号加载失败，可点击刷新重试：'+e.message}
 }
@@ -2276,8 +2285,20 @@ async function manageAccount(action){
   if(accountsBusy)return;
   const id=selectedAccount;
   let label='';
-  if(action==='delete'){
-    if(id==='default')return;
+  if(action==='delete'&&id==='default'){
+    const others=accounts.filter(a=>a.id!=='default'&&!a.closing);
+    if(!others.length){$('#accountResult').textContent='至少保留一个账号；请先添加另一个账号';return}
+    if(!window.confirm('默认账号是系统保留位，无法物理删除。将清除「'+String(accounts.find(a=>a.id==='default')?.label||'默认账号')+'」的登录会话，并从账号列表隐藏。配置数据仍保留在服务器。继续？'))return;
+    if(!window.confirm('再次确认：移除默认账号后，面板会切换到其他账号。确定继续？'))return;
+    accountsBusy=true;syncAccountButtons();
+    try{
+      await api('/api/accounts/default/detach',{method:'POST'});
+      await loadAccounts();
+      $('#accountResult').textContent='默认账号已从列表移除';
+    }catch(e){$('#accountResult').textContent='默认账号移除失败，可重试：'+e.message}
+    finally{accountsBusy=false;syncAccountButtons()}
+    return;
+  }else if(action==='delete'){
     const a=accounts.find(x=>x.id===id);
     if(!window.confirm('删除账号「'+String(a?.label||id)+'」及其配置和会话？不可恢复。'))return;
     if(!window.confirm('再次确认：永久删除此账号，不会删除默认账号。确定继续？'))return;
@@ -3283,11 +3304,11 @@ function editAutoItem(id){
     $('#kUnit').value=String(unit);$('#kEvery').value=Math.max(1,Math.round(iv/unit));
     $('#kDel').value=a.cooldown||0;$('#kCancel').style.display='inline-block';
   }else{
-    $('#pName').value=a.name;setAutoGroups('redpacket',a.groups);$('#pSuccessReply').checked=!!a.success_reply_enabled;$('#pSuccessDelay').value=a.success_reply_delay??40;$('#pSuccessText').value=a.success_reply_text||'';$('#pAiFlock').checked=!!a.ai_flock_enabled;$('#pAiWindow').value=a.success_window_seconds??40;$('#pAiPrompt').value=a.ai_flock_prompt||'';$('#pCdUnlimited').checked=!!a.cooldown_unlimited;$('#pCd').value=a.cooldown??5;toggleRedpacketReply();toggleRedpacketFlock();
-    $('#pCd').value=a.cooldown;$('#pCancel').style.display='inline-block';
+    $('#rpName').value=a.name;setAutoGroups('redpacket',a.groups);$('#pSuccessReply').checked=!!a.success_reply_enabled;$('#pSuccessDelay').value=a.success_reply_delay??40;$('#pSuccessText').value=a.success_reply_text||'';$('#pAiFlock').checked=!!a.ai_flock_enabled;$('#pAiWindow').value=a.success_window_seconds??40;$('#pAiPrompt').value=a.ai_flock_prompt||'';$('#pCdUnlimited').checked=!!a.cooldown_unlimited;$('#rpCd').value=a.cooldown??5;toggleRedpacketReply();toggleRedpacketFlock();
+    $('#rpCd').value=a.cooldown;$('#rpCancel').style.display='inline-block';
   }
   openAutoForm(editAuto.type);
-  const first={signin:'#sName',scheduled_register:'#trName',grabcodes:'#gName',custom:'#cName',redpacket:'#pName',keepalive:'#kName',link_register:'#lkName'}[editAuto.type];
+  const first={signin:'#sName',scheduled_register:'#trName',grabcodes:'#gName',custom:'#cName',redpacket:'#rpName',keepalive:'#kName',link_register:'#lkName'}[editAuto.type];
   const box=document.querySelector('#af-'+editAuto.type+' .autof-card');if(box)box.scrollIntoView({block:'start'});
   toast('编辑中,改完点保存');
 }
@@ -3301,7 +3322,7 @@ function cancelAutoEdit(t){
     cc_register:()=>{$('#ccName').value='';$('#ccUsername').value='';$('#ccEmail').value='';$('#ccPassword').value='';setAutoGroups('cc_register','');$('#ccExtraGroups').value='@CcEmby,@CC1036';$('#ccCancel').style.display='none'},
     code_register:()=>{$('#crName').value='';setCodeGroup('');$('#crBot').value='';$('#crButton').value='注册';$('#crButtonMode').value='script';$('#crReady').value='已进入注册状态';$('#crExisting').value='无法启用续期功能';$('#crUser').value='';$('#crSecret').value='';$('#crMode').value='1';$('#crLimit').value=4;$('#crWait').value=3;$('#crSuccess').value='成功';$('#crFail').value='';$('#crTimeout').value=30;$('#crGroupReply').checked=false;$('#crReplyText').value='';$('#crReplyDelay').value=5;$('#crReplyFields').classList.add('hidden');$('#crAiFlock').checked=false;$('#crAiFlockMinutes').value=5;$('#crAiFlockPrompt').value=DEFAULT_REGISTRATION_AI_FLOCK_PROMPT;setRegistrationAIFlock('cr','','');setIntegerFields('crAiFlock',{},AI_FLOCK_LIMIT_SPECS,'ai_flock_');$('#crAiFlockKnowledgeOnDemand').checked=false;$('#crAiFlockFields').classList.add('hidden');$('#crCancel').style.display='none'},
     button_register:()=>{$('#brName').value='';setAutoGroups('button_register','');$('#brAnnouncement').value='定时注册';$('#brAnnouncementButton').value='点击注册';$('#brCommand').value='/start';$('#brButton').value='创建';$('#brButtonMode').value='script';$('#brReady').value='注册状态';$('#brExisting').value='';$('#brUser').value='';$('#brSecret').value='';$('#brSuccess').value='成功';$('#brFail').value='';$('#brTimeout').value=30;$('#brGroupReply').checked=true;$('#brReplyText').value='拿下！';$('#brReplyDelay').value=5;$('#brGroupReplyFields').classList.remove('hidden');$('#brAiFlock').checked=false;$('#brAiFlockMinutes').value=5;$('#brAiFlockPrompt').value=DEFAULT_REGISTRATION_AI_FLOCK_PROMPT;setRegistrationAIFlock('br','','');setIntegerFields('brAiFlock',{},AI_FLOCK_LIMIT_SPECS,'ai_flock_');$('#brAiFlockKnowledgeOnDemand').checked=false;$('#brAiFlockFields').classList.add('hidden');$('#brCancel').style.display='none'},
-    redpacket:()=>{$('#pName').value='';setAutoGroups('redpacket','');$('#pSuccessReply').checked=false;$('#pSuccessDelay').value='40';$('#pSuccessText').value='';$('#pAiFlock').checked=false;$('#pAiWindow').value='40';$('#pAiPrompt').value='';$('#pCdUnlimited').checked=false;$('#pCd').value='5';toggleRedpacketReply();toggleRedpacketFlock();$('#pCancel').style.display='none'},
+    redpacket:()=>{$('#rpName').value='';setAutoGroups('redpacket','');$('#pSuccessReply').checked=false;$('#pSuccessDelay').value='40';$('#pSuccessText').value='';$('#pAiFlock').checked=false;$('#pAiWindow').value='40';$('#pAiPrompt').value='';$('#pCdUnlimited').checked=false;$('#rpCd').value='5';toggleRedpacketReply();toggleRedpacketFlock();$('#rpCancel').style.display='none'},
     keepalive:()=>{$('#kName').value='';$('#kTarget').value='';$('#kText').value='';$('#kEvery').value=7;$('#kUnit').value='86400';$('#kDel').value=10;$('#kCancel').style.display='none'}}[t]||(()=>{}))();
 }
 function pickGrabAct(v){
@@ -4005,7 +4026,7 @@ async function saveAuto(type){
     if(!body.reply_text)return toast('请填写要发送的内容',1);
     if(iv<60)return toast('间隔最少 1 分钟',1);
   }else{
-    body={type,name:$('#pName').value.trim(),groups:getAutoGroups('redpacket'),
+    body={type,name:$('#rpName').value.trim(),groups:getAutoGroups('redpacket'),
       success_reply_enabled:$('#pSuccessReply').checked?1:0,
       success_reply_delay:Number($('#pSuccessDelay').value)||0,
       success_reply_text:$('#pSuccessText').value.trim(),
@@ -4013,7 +4034,7 @@ async function saveAuto(type){
       ai_flock_prompt:$('#pAiPrompt').value.trim(),
       success_window_seconds:Number($('#pAiWindow').value)||40,
       cooldown_unlimited:$('#pCdUnlimited').checked?1:0,
-      cooldown:Number($('#pCd').value)||0};
+      cooldown:Number($('#rpCd').value)||0};
     if(!body.name)return toast('请填写任务名称',1);
   }
   const aiButtonMode=(body.button_mode&&body.button_mode!=='script')||(type==='custom'&&parseSteps(body.custom_steps).some(step=>step.t==='click'&&step.mode!=='script'));

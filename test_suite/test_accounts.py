@@ -214,6 +214,28 @@ class AccountsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.req('PUT', '/api/accounts/' + aid, json={'label': 'renamed'})).status_code, 200)
         self.assertEqual(self.rt(aid).label, 'renamed')
 
+    async def test_default_account_can_be_hidden_after_other_profile_exists(self):
+        # The legacy root account must not be physically deleted, but can be
+        # detached and hidden once another profile exists.
+        self.assertEqual((await self.req('POST', '/api/accounts/default/detach')).status_code, 400)
+        aid = await self.create('keep')
+        session = Path(str(self.rt().session_path) + '.session')
+        session.write_text('offline session')
+        response = await self.req('POST', '/api/accounts/default/detach')
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()['hidden'])
+        self.assertFalse(session.exists())
+        accounts = (await self.req('GET', '/api/accounts')).json()
+        self.assertEqual([x['id'] for x in accounts['accounts']], [aid])
+        self.assertEqual(accounts['default_id'], aid)
+        self.assertEqual(self.main.get_setting('default_account_hidden'), '1')
+        self.assertEqual((await self.req('DELETE', '/api/accounts/' + aid)).status_code, 200)
+        # Never leave an empty account list: the hidden root returns only when
+        # every other profile has been removed.
+        accounts = (await self.req('GET', '/api/accounts')).json()
+        self.assertEqual([x['id'] for x in accounts['accounts']], ['default'])
+        self.assertEqual(accounts['default_id'], 'default')
+
     async def test_selector_rejects_invalid_unknown_after_root_auth(self):
         for aid, status in [('../default', 400), ('', 400), ('DEFAULT', 400), ('f'*32, 404)]:
             response = await self.req('GET', '/api/state', aid)

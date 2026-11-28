@@ -199,6 +199,28 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert.strictEqual(body.keywords,'就位');assert.strictEqual(body.poem_delete_on_success,1);
     assert.strictEqual(body.poem_box_wait,8);assert.strictEqual(body.is_chat,1);
   });
+  await test('所有任务表单字段 ID 唯一，避免不同表单抢同一个输入框',async()=>{
+    const forms=[...html.matchAll(/<form[^>]*onsubmit="saveAuto\(([^)]*)\)[^"]*"[^>]*>([\s\S]*?)<\/form>/g)];
+    assert(forms.length>=10);
+    const seen=new Map();
+    for(const m of forms){
+      const type=m[1];if(!type)continue;
+      for(const idm of m[2].matchAll(/\bid="([^"]+)"/g)){
+        const id=idm[1];if(id.includes('${'))continue;
+        if(seen.has(id))throw new Error('任务表单 '+type+' 与 '+seen.get(id)+' 重复使用字段 ID: '+id);
+        seen.set(id,type);
+      }
+    }
+  });
+  await test('红包任务名称和冷却读取独立字段，不被诗词表单抢占',async()=>{
+    run("globalThis.getAutoGroups=()=>'';openAutoForm('redpacket')");
+    element('#pName').value='诗词旧值';element('#rpName').value='红包1';element('#rpCd').value='6';
+    element('#pSuccessReply').checked=false;element('#pAiFlock').checked=false;element('#pCdUnlimited').checked=false;
+    let request;context.api=async(p,o)=>{if(p==='/api/autos'&&o.method==='POST'){request=[p,o];return {id:7}}return {autos:[]}};
+    await run("saveAuto('redpacket')");
+    assert.strictEqual(request[0],'/api/autos');const body=JSON.parse(request[1].body);
+    assert.strictEqual(body.type,'redpacket');assert.strictEqual(body.name,'红包1');assert.strictEqual(body.cooldown,6);
+  });
   await test('新增及取消编辑恢复 1.6 秒和 2 秒默认值',async()=>{
     editSignin({command_delay:0,button_delay:0});run("closeAutoForm('signin');openAutoForm('signin')");
     assert.strictEqual(element('#sCommandDelay').value,'1.6');assert.strictEqual(element('#sButtonDelay').value,'2');
@@ -959,10 +981,14 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     const clean=vm.createContext({...app,fetch(){throw new Error('禁止网络')},localStorage:{getItem:()=>null,setItem(){}},document:fullDocument,window:{confirm:()=>false},setTimeout(){},clearTimeout(){}});vm.runInContext(js.replace(/\nbootstrap\(\);\s*$/,''),clean);const cx=s=>vm.runInContext(s,clean);
     for(const fn of ['loadState','loadAutos','loadSettings']){let done;clean.api=()=>new Promise(r=>done=r);const pending=cx(fn+'()');cx("selectedAccount='other';accountEpoch++;state={tg:{},logged_in:false};autos=[]");done(fn==='loadState'?{tg:{me:{name:'迟到client'}},logged_in:true,stats:{}}:fn==='loadAutos'?{autos:[{id:42,name:'迟到任务'}]}:{api_id:123456,api_hash:'mock-old-hash'});await pending;assert.strictEqual(cx('state.logged_in'),false);assert.strictEqual(cx('autos.length'),0);assert.notStrictEqual(q('#tgApiHash').value,'mock-old-hash');cx("selectedAccount='default';accountEpoch++")}
   });
-  await test('账号标签纯文本，默认不可删，其他账号两次确认，管理错误恢复按钮',async()=>{
-    ex("accounts=[{id:'default',label:'<img src=x>',logged_in:false},{id:'work',label:'工作',logged_in:true}];selectedAccount='default';renderAccounts()");assert.strictEqual(q('#accountTop').children[0].textContent,'<img src=x> · 未登录');assert(q('#accountDelete').disabled);
-    let sent=0;app.api=async()=>{sent++;return {}};await ex("manageAccount('delete')");assert.strictEqual(sent,0);
-    ex("selectedAccount='work'");let prompts=0;app.window.confirm=()=>++prompts===1;await ex("manageAccount('delete')");assert.strictEqual(prompts,2);assert.strictEqual(sent,0);
+  await test('账号标签纯文本，未登录默认隐藏，默认账号可清空移除，其他账号两次确认',async()=>{
+    ex("accounts=[{id:'default',label:'<img src=x>',logged_in:false},{id:'work',label:'工作',logged_in:true}];selectedAccount='default';renderAccounts()");assert.strictEqual(q('#accountTop').children[0].textContent,'工作 · 在线');assert(!q('#accountDelete').disabled);
+    let sent=0;app.api=async()=>{sent++;return {}};app.window.confirm=()=>false;await ex("manageAccount('delete')");assert.strictEqual(sent,0);
+    ex("selectedAccount='work';renderAccounts()");let prompts=0;app.window.confirm=()=>++prompts===1;await ex("manageAccount('delete')");assert.strictEqual(prompts,2);assert.strictEqual(sent,0);
+    ex("accounts=[{id:'default',label:'大号',logged_in:true},{id:'work',label:'工作',logged_in:true}];selectedAccount='default';renderAccounts()");assert.strictEqual(q('#accountTop').children[0].textContent,'大号 · 在线');assert(!q('#accountDelete').disabled);
+    const oldLoad=app.loadAccounts;let endpoint='';app.window.confirm=()=>true;app.api=async p=>{endpoint=p;return {ok:true,hidden:true}};app.loadAccounts=async()=>{ex("accounts=accounts.filter(a=>a.id!=='default');selectedAccount='work';renderAccounts();$('#accountResult').textContent=''")};
+    await ex("manageAccount('delete')");assert.strictEqual(endpoint,'/api/accounts/default/detach');assert.strictEqual(q('#accountResult').textContent,'默认账号已从列表移除');app.loadAccounts=oldLoad;
+    ex("accounts=[{id:'default',label:'大号',logged_in:true},{id:'work',label:'工作',logged_in:true}];selectedAccount='work';renderAccounts()");
     q('#accountLabel').value='重命名';app.api=async()=>{throw new Error('mock账号冲突')};await ex("manageAccount('rename')");assert(!q('#accountRename').disabled);assert(q('#accountResult').textContent.includes('mock账号冲突'));
   });
   await test('账号管理和登录合并，自定义 API 只保存到当前账号',async()=>{

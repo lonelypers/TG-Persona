@@ -583,6 +583,7 @@ def purge_hits(days=None):
 
 
 GLOBAL_SETTING_KEYS = {"tz", "theme", "log_keep_days", "uptime_since", "ocr_enabled", "icon_libraries",
+                       "default_account_hidden",
                        "api_id", "api_hash",
                        "signin_global_enabled", "signin_global_start", "signin_global_end",
                        "auto_backup_enabled", "auto_backup_time", "auto_backup_account",
@@ -10957,14 +10958,52 @@ class AccountInput(BaseModel):
 
 @app.get("/api/accounts")
 async def list_accounts():
+    runtimes = [runtime for runtime in account_registry.accounts.values() if not runtime.closing]
+    hidden_default = get_setting("default_account_hidden") == "1"
+    # 默认账号是历史根目录，不能物理删除；用户主动移除后从列表隐藏。
+    # 但不能让列表变空：其他账号都被删掉时，默认账号重新出现以便登录。
+    has_other = any(runtime.id != "default" for runtime in runtimes)
+    visible = [runtime for runtime in runtimes
+               if not (runtime.id == "default" and hidden_default and has_other)]
+    default_id = "default" if any(runtime.id == "default" for runtime in visible) else (visible[0].id if visible else "default")
     return {"accounts": [{"id": runtime.id, "label": runtime.label,
                           "phase": runtime.tg_state["phase"],
                           "logged_in": runtime.tg_state["phase"] == "ready",
                           "me": runtime.tg_state.get("me"), "paused": runtime.running["paused"],
                           "error": runtime.storage_error or runtime.tg_state.get("err"),
                           "created_at": runtime.created_at}
-                         for runtime in account_registry.accounts.values() if not runtime.closing],
-            "default_id": "default"}
+                         for runtime in visible],
+            "default_id": default_id}
+
+
+@app.post("/api/accounts/default/detach")
+async def detach_default_account():
+    """Clear and hide the legacy root account without deleting the root DB."""
+    runtimes = [runtime for runtime in account_registry.accounts.values() if not runtime.closing]
+    if not any(runtime.id != "default" for runtime in runtimes):
+        raise HTTPException(400, "至少保留另一个账号，才能移除默认账号")
+    runtime = account_registry.select("default")
+    # Root DB carries global panel settings, so the legacy account cannot be
+    # physically removed. Stop its Telegram session, then hide it from the
+    # account list. It reappears only if every other account is deleted.
+    await runtime.requests_idle.wait()
+    async with runtime.lifecycle():
+        await runtime.stop(logout=True, secure_storage=False)
+    for suffix in ("", ".session", ".session-journal", ".session-wal", ".session-shm", ".session.session"):
+        path = Path(str(runtime.session_path) + suffix)
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            log.warning("默认账号会话文件清理失败: %s", path)
+    try:
+        runtime.avatar_file.unlink(missing_ok=True)
+    except OSError:
+        pass
+    with use_runtime(runtime):
+        set_setting("default_account_hidden", "1")
+        set_setting("avatar", "")
+        set_setting("login_pending_at", "")
+    return {"ok": True, "hidden": True}
 
 
 @app.post("/api/accounts")
